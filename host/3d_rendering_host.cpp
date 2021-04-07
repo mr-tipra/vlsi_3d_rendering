@@ -18,11 +18,11 @@
 #ifdef HW
   // sdsoc headers
   // hardware function declaration
-  #include "../sw/rendering.h"
+  #include "../top/rendering.h"
 #endif
 
 #ifdef SW
-  # include "../sw/rendering_sw.h"
+  # include "../top/rendering_sw.h"
 #endif
 
 // other headers
