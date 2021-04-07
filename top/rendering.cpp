@@ -105,7 +105,6 @@ bit8 find_max( bit8 in0, bit8 in1, bit8 in2 )
 // project a 3D triangle to a 2D triangle
 void projection ( Triangle_3D triangle_3d, Triangle_2D *triangle_2d, bit2 angle )
 {
-  //#pragma HLS INLINE off
   // Setting camera to (0,0,-1), the canvas at z=0 plane
   // The 3D model lies in z>0 space
   // The coordinate on canvas is proportional to the corresponding coordinate 
@@ -147,7 +146,6 @@ void projection ( Triangle_3D triangle_3d, Triangle_2D *triangle_2d, bit2 angle 
 // calculate bounding box for a 2D triangle
 bit2 rasterization1 ( Triangle_2D triangle_2d, bit8 max_min[], Triangle_2D *triangle_2d_same, bit16 max_index[])
 {
-  //#pragma HLS INLINE off
   // clockwise the vertices of input 2d triangle
   if ( check_clockwise( triangle_2d ) == 0 )
     return 1;
@@ -179,7 +177,6 @@ bit2 rasterization1 ( Triangle_2D triangle_2d, bit8 max_min[], Triangle_2D *tria
 // find pixels in the triangles from the bounding box
 bit16 rasterization2 ( bit2 flag, bit8 max_min[], bit16 max_index[], Triangle_2D triangle_2d_same, CandidatePixel fragment2[] )
 {
-  //#pragma HLS INLINE off
   // clockwise the vertices of input 2d triangle
   if ( flag )
   {
@@ -190,7 +187,7 @@ bit16 rasterization2 ( bit2 flag, bit8 max_min[], bit16 max_index[], Triangle_2D
 
   RAST2: for ( bit16 k = 0; k < max_index[0]; k++ )
   {
-    //#pragma HLS PIPELINE II=1
+    #pragma HLS LOOP_TRIPCOUNT max=MAX_X*MAX_Y
     bit8 x = max_min[0] + k%max_min[4];
     bit8 y = max_min[2] + k/max_min[4];
 
@@ -210,7 +207,6 @@ bit16 rasterization2 ( bit2 flag, bit8 max_min[], bit16 max_index[], Triangle_2D
 // filter hidden pixels
 bit16 zculling ( bit16 counter, CandidatePixel fragments[], bit16 size, Pixel pixels[])
 {
-  //#pragma HLS INLINE off
 
   // initilize the z-buffer in rendering first triangle for an image
   static bit8 z_buffer[MAX_X][MAX_Y];
@@ -218,7 +214,6 @@ bit16 zculling ( bit16 counter, CandidatePixel fragments[], bit16 size, Pixel pi
   {
     ZCULLING_INIT_ROW: for ( bit16 i = 0; i < MAX_X; i++)
     {
-    //  #pragma HLS PIPELINE II=1
       ZCULLING_INIT_COL: for ( bit16 j = 0; j < MAX_Y; j++)
       {
         z_buffer[i][j] = 255;
@@ -232,7 +227,7 @@ bit16 zculling ( bit16 counter, CandidatePixel fragments[], bit16 size, Pixel pi
   // update z-buffer and pixels
   ZCULLING: for ( bit16 n = 0; n < size; n++ ) 
   {
-    //#pragma HLS PIPELINE II=1
+    #pragma HLS LOOP_TRIPCOUNT max=MAX_X*MAX_Y
     if( fragments[n].z < z_buffer[fragments[n].y][fragments[n].x] )
     {
       pixels[pixel_cntr].x     = fragments[n].x;
@@ -249,14 +244,12 @@ bit16 zculling ( bit16 counter, CandidatePixel fragments[], bit16 size, Pixel pi
 // color the frame buffer
 void coloringFB(bit16 counter,  bit16 size_pixels, Pixel pixels[], bit8 frame_buffer[MAX_X][MAX_Y])
 {
-  //#pragma HLS INLINE off
 
   if ( counter == 0 )
   {
     // initilize the framebuffer for a new image
     COLORING_FB_INIT_ROW: for ( bit16 i = 0; i < MAX_X; i++)
     {
-    //  #pragma HLS PIPELINE II=1
       COLORING_FB_INIT_COL: for ( bit16 j = 0; j < MAX_Y; j++)
         frame_buffer[i][j] = 0;
     }
@@ -265,7 +258,7 @@ void coloringFB(bit16 counter,  bit16 size_pixels, Pixel pixels[], bit8 frame_bu
   // update the framebuffer
   COLORING_FB: for ( bit16 i = 0; i < size_pixels; i++)
   {
-    #pragma HLS PIPELINE II=1
+    #pragma HLS LOOP_TRIPCOUNT max=MAX_X*MAX_Y
     frame_buffer[ pixels[i].x ][ pixels[i].y ] = pixels[i].color;
   }
 
@@ -274,11 +267,9 @@ void coloringFB(bit16 counter,  bit16 size_pixels, Pixel pixels[], bit8 frame_bu
 // stream out the frame buffer
 void output_FB(bit8 frame_buffer[MAX_X][MAX_Y], bit32 output[NUM_FB])
 {
-  //#pragma HLS INLINE
   bit32 out_FB = 0;
   OUTPUT_FB_ROW: for ( bit16 i = 0; i < MAX_X; i++)
   {
-    //#pragma HLS PIPELINE II=1
     OUTPUT_FB_COL: for ( bit16 j = 0; j < MAX_Y; j = j + 4)
     {
       out_FB( 7,  0) = frame_buffer[i][j + 0];
@@ -296,11 +287,6 @@ extern "C"
 {
   void rendering( bit32 input[3*NUM_3D_TRI], bit32 output[NUM_FB])
   {
-//    #pragma HLS INTERFACE m_axi port=input offset=slave bundle=gmem
-//    #pragma HLS INTERFACE m_axi port=output offset=slave bundle=gmem
-//    #pragma HLS INTERFACE s_axilite port=input bundle=control
-//    #pragma HLS INTERFACE s_axilite port=output bundle=control
-//    #pragma HLS INTERFACE s_axilite port=return bundle=control
   
     // local variables
     Triangle_3D triangle_3ds;
@@ -321,8 +307,10 @@ extern "C"
     bit2 flag;
   
     // processing NUM_3D_TRI 3D triangles
+
     TRIANGLES: for (bit16 i = 0; i < NUM_3D_TRI; i++)
     {
+
       bit32 input_lo  = input[3*i];
       bit32 input_mi  = input[3*i+1];
       bit32 input_hi  = input[3*i+2];
@@ -337,10 +325,6 @@ extern "C"
       triangle_3ds.y2 = input_mi(31, 24);
       triangle_3ds.z2 = input_hi( 7,  0);
 
-      // turn on dataflow if it is enabled 
-//      #ifdef ENABLE_DATAFLOW
-//        #pragma HLS dataflow
-//      #endif
 
       // five stages for processing each 3D triangle
       projection( triangle_3ds, &triangle_2ds, angle );
