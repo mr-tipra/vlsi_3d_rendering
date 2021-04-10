@@ -187,7 +187,7 @@ bit16 rasterization2 ( bit2 flag, bit8 max_min[], bit16 max_index[], Triangle_2D
 
   RAST2: for ( bit16 k = 0; k < max_index[0]; k++ )
   {
-    #pragma HLS LOOP_TRIPCOUNT max=MAX_X*MAX_Y
+    #pragma HLS LOOP_TRIPCOUNT max=924
     bit8 x = max_min[0] + k%max_min[4];
     bit8 y = max_min[2] + k/max_min[4];
 
@@ -227,7 +227,7 @@ bit16 zculling ( bit16 counter, CandidatePixel fragments[], bit16 size, Pixel pi
   // update z-buffer and pixels
   ZCULLING: for ( bit16 n = 0; n < size; n++ ) 
   {
-    #pragma HLS LOOP_TRIPCOUNT max=MAX_X*MAX_Y
+    #pragma HLS LOOP_TRIPCOUNT max=444
     if( fragments[n].z < z_buffer[fragments[n].y][fragments[n].x] )
     {
       pixels[pixel_cntr].x     = fragments[n].x;
@@ -258,7 +258,7 @@ void coloringFB(bit16 counter,  bit16 size_pixels, Pixel pixels[], bit8 frame_bu
   // update the framebuffer
   COLORING_FB: for ( bit16 i = 0; i < size_pixels; i++)
   {
-    #pragma HLS LOOP_TRIPCOUNT max=MAX_X*MAX_Y
+    #pragma HLS LOOP_TRIPCOUNT max=444
     frame_buffer[ pixels[i].x ][ pixels[i].y ] = pixels[i].color;
   }
 
