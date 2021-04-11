@@ -1,12 +1,12 @@
 /*===============================================================*/
 /*                                                               */
-/*                      rendering_sw.cpp                         */
+/*                        rendering.cpp                          */
 /*                                                               */
-/*              Software version for 3D Rendering                */
+/*                 C++ kernel for 3D Rendering                   */
 /*                                                               */
 /*===============================================================*/
 
-#include "rendering_sw.h"
+#include "../host/typedefs.h"
 
 /*======================UTILITY FUNCTIONS========================*/
 
@@ -49,7 +49,7 @@ void clockwise_vertices( Triangle_2D *triangle_2d )
 // by Pineda algorithm
 // if so, return true
 // else, return false
-bool pixel_in_triangle( bit8 x, bit8 y, Triangle_2D triangle_2d )
+bit1 pixel_in_triangle( bit8 x, bit8 y, Triangle_2D triangle_2d )
 {
 
   int pi0, pi1, pi2;
@@ -103,7 +103,7 @@ bit8 find_max( bit8 in0, bit8 in1, bit8 in2 )
 /*======================PROCESSING STAGES========================*/
 
 // project a 3D triangle to a 2D triangle
-void projection ( Triangle_3D triangle_3d, Triangle_2D *triangle_2d, int angle )
+void projection ( Triangle_3D triangle_3d, Triangle_2D *triangle_2d, bit2 angle )
 {
   // Setting camera to (0,0,-1), the canvas at z=0 plane
   // The 3D model lies in z>0 space
@@ -144,13 +144,22 @@ void projection ( Triangle_3D triangle_3d, Triangle_2D *triangle_2d, int angle )
 }
 
 // calculate bounding box for a 2D triangle
-bool rasterization1 ( Triangle_2D triangle_2d, bit8 max_min[], int max_index[])
+bit2 rasterization1 ( Triangle_2D triangle_2d, bit8 max_min[], Triangle_2D *triangle_2d_same, bit16 max_index[])
 {
   // clockwise the vertices of input 2d triangle
   if ( check_clockwise( triangle_2d ) == 0 )
     return 1;
   if ( check_clockwise( triangle_2d ) < 0 )
     clockwise_vertices( &triangle_2d );
+
+  // copy the same 2D triangle
+  triangle_2d_same->x0 = triangle_2d.x0;
+  triangle_2d_same->y0 = triangle_2d.y0;
+  triangle_2d_same->x1 = triangle_2d.x1;
+  triangle_2d_same->y1 = triangle_2d.y1;
+  triangle_2d_same->x2 = triangle_2d.x2;
+  triangle_2d_same->y2 = triangle_2d.y2;
+  triangle_2d_same->z  = triangle_2d.z ;
 
   // find the rectangle bounds of 2D triangles
   max_min[0] = find_min( triangle_2d.x0, triangle_2d.x1, triangle_2d.x2 );
@@ -166,28 +175,30 @@ bool rasterization1 ( Triangle_2D triangle_2d, bit8 max_min[], int max_index[])
 }
 
 // find pixels in the triangles from the bounding box
-int rasterization2 ( bool flag, bit8 max_min[], int max_index[], Triangle_2D triangle_2d, CandidatePixel fragment[] )
+bit16 rasterization2 ( bit2 flag, bit8 max_min[], bit16 max_index[], Triangle_2D triangle_2d_same, CandidatePixel fragment2[] )
 {
   // clockwise the vertices of input 2d triangle
   if ( flag )
   {
     return 0;
   }
-
   bit8 color = 100;
-  int i = 0;
+  bit16 i = 0;
 
-  RAST2: for ( int k = 0; k < max_index[0]; k ++ )
+  RAST2: for ( bit16 k = 0; k < max_index[0]; k++ )
   {
-    bit8 x = max_min[0] + k % max_min[4];
-    bit8 y = max_min[2] + k / max_min[4];
+    #pragma HLS LOOP_TRIPCOUNT max=924
 
-    if( pixel_in_triangle( x, y, triangle_2d ) )
+#pragma HLS PIPELINE II=1
+    bit8 x = max_min[0] + k%max_min[4];
+    bit8 y = max_min[2] + k/max_min[4];
+
+    if( pixel_in_triangle( x, y, triangle_2d_same ) )
     {
-      fragment[i].x = x;
-      fragment[i].y = y;
-      fragment[i].z = triangle_2d.z;
-      fragment[i].color = color;
+      fragment2[i].x = x;
+      fragment2[i].y = y;
+      fragment2[i].z = triangle_2d_same.z;
+      fragment2[i].color = color;
       i++;
     }
   }
@@ -196,28 +207,36 @@ int rasterization2 ( bool flag, bit8 max_min[], int max_index[], Triangle_2D tri
 }
 
 // filter hidden pixels
-int zculling ( int counter, CandidatePixel fragments[], int size, Pixel pixels[])
+
+bit16 zculling ( bit16 counter, CandidatePixel fragments[], bit16 size, Pixel pixels[])
 {
 
   // initilize the z-buffer in rendering first triangle for an image
   static bit8 z_buffer[MAX_X][MAX_Y];
+  #pragma ARRAY_RESHAPE variable=z_buffer complete dim=2
   if (counter == 0)
   {
-    ZCULLING_INIT_ROW: for ( int i = 0; i < MAX_X; i ++ )
+    ZCULLING_INIT_ROW: for ( bit16 i = 0; i < MAX_X; i++)
     {
-      ZCULLING_INIT_COL: for ( int j = 0; j < MAX_Y; j ++ )
+
+      ZCULLING_INIT_COL: for ( bit16 j = 0; j < MAX_Y; j++)
       {
+#pragma HLS LOOP_FLATTEN
+#pragma HLS UNROLL
+
         z_buffer[i][j] = 255;
       }
     }
   }
 
   // pixel counter
-  int pixel_cntr = 0;
+  bit16 pixel_cntr = 0;
   
   // update z-buffer and pixels
-  ZCULLING: for ( int n = 0; n < size; n ++ ) 
+  ZCULLING: for ( bit16 n = 0; n < size; n++ ) 
   {
+    #pragma HLS LOOP_TRIPCOUNT max=444
+#pragma HLS PIPELINE II=1
     if( fragments[n].z < z_buffer[fragments[n].y][fragments[n].x] )
     {
       pixels[pixel_cntr].x     = fragments[n].x;
@@ -232,54 +251,112 @@ int zculling ( int counter, CandidatePixel fragments[], int size, Pixel pixels[]
 }
 
 // color the frame buffer
-void coloringFB(int counter, int size_pixels, Pixel pixels[], bit8 frame_buffer[MAX_X][MAX_Y])
+void coloringFB(bit16 counter,  bit16 size_pixels, Pixel pixels[], bit8 frame_buffer[MAX_X][MAX_Y])
 {
 
   if ( counter == 0 )
   {
     // initilize the framebuffer for a new image
-    COLORING_FB_INIT_ROW: for ( int i = 0; i < MAX_X; i ++ )
+    COLORING_FB_INIT_ROW: for ( bit16 i = 0; i < MAX_X; i++)
     {
-      COLORING_FB_INIT_COL: for ( int j = 0; j < MAX_Y; j ++ )
+
+      COLORING_FB_INIT_COL: for ( bit16 j = 0; j < MAX_Y; j++){
+	#pragma LOOP_FLATTEN
+	#pragma HLS UNROLL
         frame_buffer[i][j] = 0;
+      }
     }
   }
 
   // update the framebuffer
-  COLORING_FB: for ( int i = 0; i < size_pixels; i ++ )
+  COLORING_FB: for ( bit16 i = 0; i < size_pixels; i++)
+  {
+    #pragma HLS LOOP_TRIPCOUNT max=444
+#pragma HLS PIPELINE II=2
     frame_buffer[ pixels[i].x ][ pixels[i].y ] = pixels[i].color;
+  }
 
 }
 
-/*========================TOP FUNCTION===========================*/
-void rendering_sw( Triangle_3D triangle_3ds[NUM_3D_TRI], bit8 output[MAX_X][MAX_Y])
+// stream out the frame buffer
+void output_FB(bit8 frame_buffer[MAX_X][MAX_Y], bit32 output[NUM_FB])
 {
-  // local variables
-
-  // 2D triangle
-  Triangle_2D triangle_2ds;
-  // projection angle
-  int angle = 0;
-
-  // max-min index arrays
-  bit8 max_min[5];
-  int max_index[1];
-
-  // fragments
-  CandidatePixel fragment[500];
-
-  // pixel buffer
-  Pixel pixels[500];
-
-  // processing NUM_3D_TRI 3D triangles
-  TRIANGLES: for (int i = 0; i < NUM_3D_TRI; i ++ )
+#pragma HLS INLINE OFF
+  bit32 out_FB = 0;
+  OUTPUT_FB_ROW: for ( bit16 i = 0; i < MAX_X; i++)
   {
-    // five stages for processing each 3D triangle
-    projection( triangle_3ds[i], &triangle_2ds, angle );
-    bool flag = rasterization1(triangle_2ds, max_min, max_index);
-    int size_fragment = rasterization2( flag, max_min, max_index, triangle_2ds, fragment );
-    int size_pixels = zculling( i, fragment, size_fragment, pixels);
-    coloringFB ( i, size_pixels, pixels, output);
-  }
 
+    OUTPUT_FB_COL: for ( bit16 j = 0; j < MAX_Y; j = j + 4)
+    {
+#pragma HLS LOOP_FLATTEN
+#pragma HLS UNROLL
+      out_FB( 7,  0) = frame_buffer[i][j + 0];
+      out_FB(15,  8) = frame_buffer[i][j + 1];
+      out_FB(23, 16) = frame_buffer[i][j + 2];
+      out_FB(31, 24) = frame_buffer[i][j + 3];
+      output[i * MAX_Y / 4 + j / 4] = out_FB;
+    }
+  }
+}
+
+
+/*========================TOP FUNCTION===========================*/
+extern "C" 
+{
+  void rendering( bit32 input[3*NUM_3D_TRI], bit32 output[NUM_FB])
+  {
+
+#pragma HLS ARRAY_RESHAPE variable=output cyclic factor=32
+    // local variables
+    Triangle_3D triangle_3ds;
+    Triangle_2D triangle_2ds;
+    Triangle_2D triangle_2ds_same;
+  
+    bit16 size_fragment;
+    CandidatePixel fragment[500];
+  
+    bit16 size_pixels;
+    Pixel pixels[500];
+  
+    bit8 frame_buffer[MAX_X][MAX_Y];
+#pragma HLS ARRAY_RESHAPE variable=frame_buffer complete dim=2
+    bit2 angle = 0;
+  
+    bit8 max_min[5];
+    bit16 max_index[1];
+    bit2 flag;
+  
+    // processing NUM_3D_TRI 3D triangles
+
+    TRIANGLES: for (bit16 i = 0; i < NUM_3D_TRI; i++)
+    {
+
+      bit32 input_lo  = input[3*i];
+      bit32 input_mi  = input[3*i+1];
+      bit32 input_hi  = input[3*i+2];
+  
+      triangle_3ds.x0 = input_lo( 7,  0);
+      triangle_3ds.y0 = input_lo(15,  8);
+      triangle_3ds.z0 = input_lo(23, 16);
+      triangle_3ds.x1 = input_lo(31, 24);
+      triangle_3ds.y1 = input_mi( 7,  0);
+      triangle_3ds.z1 = input_mi(15,  8);
+      triangle_3ds.x2 = input_mi(23, 16);
+      triangle_3ds.y2 = input_mi(31, 24);
+      triangle_3ds.z2 = input_hi( 7,  0);
+
+
+      // five stages for processing each 3D triangle
+      projection( triangle_3ds, &triangle_2ds, angle );
+      flag = rasterization1( triangle_2ds, max_min, &triangle_2ds_same, max_index);
+      size_fragment = rasterization2( flag, max_min, max_index, triangle_2ds_same, fragment );
+      size_pixels = zculling( i, fragment, size_fragment, pixels);
+      coloringFB ( i, size_pixels, pixels, frame_buffer);
+
+
+    }
+  
+    // output values: frame buffer
+    output_FB(frame_buffer,output);
+  }
 }
