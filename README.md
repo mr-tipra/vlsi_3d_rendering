@@ -4,7 +4,7 @@ The host files (test bench) are in the host folder. Include the 3 .cpp files as 
 
 The correponding area/latency/base solutions are in their respective folders. Include the .cpp file as main file, selecting *rendering* as top function.
 
-While running C sim or Co-sim, pass in the input argument to the reference file as:
+While running C sim or Co-sim, pass in the input argument to the reference file as (included in this directory, required for testing):
 ```
 -f <absolute path to outputs file>
 ```
